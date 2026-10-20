@@ -18,6 +18,7 @@ import { Footer } from './components/Footer';
 import { BirthdayConfig, MemoryImage, LoveReason } from './types';
 import { getCustomAudio, removeCustomAudio } from './utils/audioStorage';
 import { saveMemoriesToIndexedDB, getMemoriesFromIndexedDB } from './utils/photoStorage';
+import { uploadImageToVercelBlob } from './utils/blobUpload';
 
 const DEFAULT_ENVELOPE_LETTER = `كل سنة وانتي طيبة يا أيويه يا روح قلبي، وكل سنة وانتي معايا ومنورة حياتي، وكل سنة وانتي أحلى حاجة حصلتلي في الدنيا ❤️
 
@@ -445,16 +446,18 @@ export default function App() {
   };
 
   const handleAddMemory = async (newMem: MemoryImage) => {
-    setMemories((prev) => {
-      const updated = [newMem, ...prev];
-      saveMemoriesToIndexedDB(updated);
-      try {
-        localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
-      } catch (e) {
-        console.error(e);
-      }
+    let finalImageUrl = newMem.imageUrl;
 
-      // Sync updated array (with full photo data) directly to server so all devices render it
+    if (newMem.imageUrl && newMem.imageUrl.startsWith('data:')) {
+      finalImageUrl = await uploadImageToVercelBlob(newMem.imageUrl, newMem.title);
+    }
+
+    const memWithBlobUrl: MemoryImage = { ...newMem, imageUrl: finalImageUrl };
+
+    setMemories((prev) => {
+      const updated = [memWithBlobUrl, ...prev];
+      saveMemoriesToIndexedDB(updated);
+
       fetch('/api/memories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -465,55 +468,21 @@ export default function App() {
     });
 
     showToast('تمت إضافة الصورة وحفظها بنجاح! 📸✨');
-
-    // Attempt background upload to Vercel Blob Store CDN if available
-    if (newMem.imageUrl && newMem.imageUrl.startsWith('data:')) {
-      try {
-        const res = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dataUrl: newMem.imageUrl,
-            fileName: newMem.title,
-          }),
-        });
-        const data = await res.json();
-        // If Vercel Blob returned a permanent public CDN HTTP/HTTPS URL, update state
-        if (data.success && data.url && data.url.startsWith('http')) {
-          const uploadedMem = { ...newMem, imageUrl: data.url };
-          setMemories((prev) => {
-            const updated = prev.map((m) => (m.id === newMem.id ? uploadedMem : m));
-            saveMemoriesToIndexedDB(updated);
-            try {
-              localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
-            } catch (e) {
-              console.error(e);
-            }
-            fetch('/api/memories', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(updated),
-            }).catch(() => {});
-            return updated;
-          });
-        }
-      } catch (err) {
-        console.warn('Background upload sync error:', err);
-      }
-    }
   };
 
   const handleUpdateMemory = async (updatedMem: MemoryImage) => {
-    setMemories((prev) => {
-      const updated = prev.map((m) => (m.id === updatedMem.id ? updatedMem : m));
-      saveMemoriesToIndexedDB(updated);
-      try {
-        localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
-      } catch (e) {
-        console.error(e);
-      }
+    let finalImageUrl = updatedMem.imageUrl;
 
-      // Sync updated array to server so all devices render the modification
+    if (updatedMem.imageUrl && updatedMem.imageUrl.startsWith('data:')) {
+      finalImageUrl = await uploadImageToVercelBlob(updatedMem.imageUrl, updatedMem.title);
+    }
+
+    const memWithBlobUrl: MemoryImage = { ...updatedMem, imageUrl: finalImageUrl };
+
+    setMemories((prev) => {
+      const updated = prev.map((m) => (m.id === updatedMem.id ? memWithBlobUrl : m));
+      saveMemoriesToIndexedDB(updated);
+
       fetch('/api/memories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -524,75 +493,43 @@ export default function App() {
     });
 
     showToast('تم تعديل الصورة وحفظها بنجاح! ✏️✨');
-
-    // Attempt background upload to Vercel Blob Store CDN if available
-    if (updatedMem.imageUrl && updatedMem.imageUrl.startsWith('data:')) {
-      try {
-        const res = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dataUrl: updatedMem.imageUrl,
-            fileName: updatedMem.title,
-          }),
-        });
-        const data = await res.json();
-        if (data.success && data.url && data.url.startsWith('http')) {
-          const uploadedMem = { ...updatedMem, imageUrl: data.url };
-          setMemories((prev) => {
-            const updated = prev.map((m) => (m.id === updatedMem.id ? uploadedMem : m));
-            saveMemoriesToIndexedDB(updated);
-            try {
-              localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
-            } catch (e) {
-              console.error(e);
-            }
-            fetch('/api/memories', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(updated),
-            }).catch(() => {});
-            return updated;
-          });
-        }
-      } catch (err) {
-        console.warn('Background upload sync error:', err);
-      }
-    }
   };
 
   const handleDeleteMemory = (id: string) => {
     setMemories((prev) => {
       const updated = prev.filter((m) => m.id !== id);
       saveMemoriesToIndexedDB(updated);
-      try {
-        localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
-      } catch (e) {
-        console.error(e);
-      }
+
       fetch('/api/memories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),
       }).catch((err) => console.error('Failed to sync delete to server:', err));
+
       return updated;
     });
+
     showToast('تم مسح الصورة من الألبوم 🗑️');
   };
 
   const handleSaveMemories = async (updatedMemories: MemoryImage[]) => {
-    setMemories(updatedMemories);
-    saveMemoriesToIndexedDB(updatedMemories);
-    try {
-      localStorage.setItem('romantic_bday_memories', JSON.stringify(updatedMemories));
-    } catch (e) {
-      console.error(e);
-    }
+    const processed = await Promise.all(
+      updatedMemories.map(async (m) => {
+        if (m.imageUrl && m.imageUrl.startsWith('data:')) {
+          const blobUrl = await uploadImageToVercelBlob(m.imageUrl, m.title);
+          return { ...m, imageUrl: blobUrl };
+        }
+        return m;
+      })
+    );
+
+    setMemories(processed);
+    saveMemoriesToIndexedDB(processed);
 
     fetch('/api/memories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedMemories),
+      body: JSON.stringify(processed),
     }).catch((err) => console.error('Failed to sync memories to server:', err));
 
     showToast('تم حفظ معرض الصور والذكريات بنجاح! 📸✨');
@@ -779,19 +716,26 @@ export default function App() {
         <GallerySection
           memories={memories}
           onAddMemory={handleAddMemory}
-          onAddMultipleMemories={(newBatch) => {
-            const updated = [...newBatch, ...memories];
-            setMemories(updated);
-            try {
-              localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
-            } catch (e) {
-              console.error(e);
-            }
-            fetch('/api/memories', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(updated),
-            }).catch((err) => console.error('Failed to sync multiple memories:', err));
+          onAddMultipleMemories={async (newBatch) => {
+            const uploadedBatch = await Promise.all(
+              newBatch.map(async (m) => {
+                if (m.imageUrl && m.imageUrl.startsWith('data:')) {
+                  const url = await uploadImageToVercelBlob(m.imageUrl, m.title);
+                  return { ...m, imageUrl: url };
+                }
+                return m;
+              })
+            );
+            setMemories((prev) => {
+              const updated = [...uploadedBatch, ...prev];
+              saveMemoriesToIndexedDB(updated);
+              fetch('/api/memories', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updated),
+              }).catch((err) => console.error('Failed to sync multiple memories:', err));
+              return updated;
+            });
             showToast('تمت إضافة الصور وحفظها نهائياً! 📸✨');
           }}
           onUpdateMemory={handleUpdateMemory}
