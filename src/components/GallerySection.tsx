@@ -5,6 +5,7 @@ import { MemoryImage } from '../types';
 interface GallerySectionProps {
   memories: MemoryImage[];
   onAddMemory: (newMemory: MemoryImage) => void;
+  onAddMultipleMemories?: (newMemories: MemoryImage[]) => void;
   onUpdateMemory?: (updatedMemory: MemoryImage) => void;
   onDeleteMemory?: (id: string) => void;
   canEdit?: boolean;
@@ -16,6 +17,7 @@ interface GallerySectionProps {
 export const GallerySection: React.FC<GallerySectionProps> = ({
   memories,
   onAddMemory,
+  onAddMultipleMemories,
   onUpdateMemory,
   onDeleteMemory,
   canEdit = true,
@@ -28,6 +30,7 @@ export const GallerySection: React.FC<GallerySectionProps> = ({
   const [editingMemory, setEditingMemory] = useState<MemoryImage | null>(null);
   const [photoToDelete, setPhotoToDelete] = useState<MemoryImage | null>(null);
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
+  const [isProcessingImage, setIsProcessingImage] = useState<boolean>(false);
 
   // Photo form state (used for both Add and Edit)
   const [newTitle, setNewTitle] = useState('');
@@ -93,40 +96,54 @@ export const GallerySection: React.FC<GallerySectionProps> = ({
     }
   };
 
-  // Fast client-side image compression so photos fit smoothly into storage
+  // Fast client-side image compression so photos fit smoothly into storage without failing
   const compressImageFile = (file: File): Promise<string> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
+        const result = e.target?.result;
+        if (!result || typeof result !== 'string') {
+          resolve('');
+          return;
+        }
+
         const img = new Image();
         img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const maxDim = 1200;
-          let width = img.width;
-          let height = img.height;
+          try {
+            const canvas = document.createElement('canvas');
+            const maxDim = 1080;
+            let width = img.width;
+            let height = img.height;
 
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
+            if (width > maxDim || height > maxDim) {
+              if (width > height) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+              } else {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+              }
             }
-          }
 
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(e.target?.result as string);
-            return;
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              resolve(result);
+              return;
+            }
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressed = canvas.toDataURL('image/jpeg', 0.80);
+            resolve(compressed || result);
+          } catch {
+            resolve(result);
           }
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.82));
         };
-        img.onerror = () => resolve(e.target?.result as string);
-        img.src = e.target?.result as string;
+        img.onerror = () => {
+          // If Image() fails to decode, fallback directly to reader base64 result
+          resolve(result);
+        };
+        img.src = result;
       };
       reader.onerror = () => resolve('');
       reader.readAsDataURL(file);
@@ -137,59 +154,75 @@ export const GallerySection: React.FC<GallerySectionProps> = ({
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    if (!editingMemory && files.length > 1) {
-      for (let idx = 0; idx < files.length; idx++) {
-        const file = files[idx];
-        const compressedUrl = await compressImageFile(file);
-        if (compressedUrl) {
-          const newPhoto: MemoryImage = {
-            id: 'user_photo_' + Date.now() + '_' + idx,
-            title: file.name.replace(/\.[^/.]+$/, '') || `صورتنا الحلوة #${memories.length + idx + 1}`,
-            date: 'أيام وسنين حبنا',
-            caption: 'ذكرى حلوة من أجمل أيامنا سوا ❤️',
-            imageUrl: compressedUrl,
-            fallbackGradient: 'from-rose-950 via-purple-950 to-neutral-950',
-          };
-          onAddMemory(newPhoto);
+    setIsProcessingImage(true);
+
+    try {
+      if (!editingMemory && files.length > 1) {
+        const batch: MemoryImage[] = [];
+        for (let idx = 0; idx < files.length; idx++) {
+          const file = files[idx];
+          const compressedUrl = await compressImageFile(file);
+          if (compressedUrl) {
+            batch.push({
+              id: 'photo_' + Date.now() + '_' + idx + '_' + Math.random().toString(36).substring(2, 6),
+              title: file.name.replace(/\.[^/.]+$/, '') || `صورتنا الحلوة #${memories.length + idx + 1}`,
+              date: 'لحظة خاصة',
+              caption: 'ذكرى حلوة من أجمل أيامنا سوا ❤️',
+              imageUrl: compressedUrl,
+              fallbackGradient: 'from-rose-950 via-purple-950 to-neutral-950',
+            });
+          }
+        }
+        if (batch.length > 0) {
+          if (onAddMultipleMemories) {
+            onAddMultipleMemories(batch);
+          } else {
+            batch.forEach((b) => onAddMemory(b));
+          }
+        }
+        setShowUploadModal(false);
+        return;
+      }
+
+      const file = files[0];
+      const compressedUrl = await compressImageFile(file);
+      if (compressedUrl) {
+        setPreviewUrl(compressedUrl);
+        setNewUrl('');
+        if (!newTitle) {
+          const autoTitle = file.name.replace(/\.[^/.]+$/, '').trim();
+          setNewTitle(autoTitle && !autoTitle.startsWith('image') ? autoTitle : 'صورتنا الحلوة');
+        }
+        if (!newDate) {
+          setNewDate('لحظة خاصة');
         }
       }
-      setShowUploadModal(false);
-      return;
-    }
-
-    const file = files[0];
-    const compressedUrl = await compressImageFile(file);
-    if (compressedUrl) {
-      // Store compressed base64 in previewUrl only (not in the text input value!)
-      setPreviewUrl(compressedUrl);
-      setNewUrl('');
-      if (!newTitle) {
-        setNewTitle(file.name.replace(/\.[^/.]+$/, '') || 'صورتنا الحلوة');
-      }
+    } finally {
+      setIsProcessingImage(false);
     }
   };
 
   const handleSavePhoto = (e: React.FormEvent) => {
     e.preventDefault();
     const finalUrl = previewUrl || newUrl.trim();
-    if (!finalUrl && !newTitle.trim()) return;
+    if (!finalUrl && !newTitle.trim() && !editingMemory) return;
 
     if (editingMemory) {
       const updatedPhoto: MemoryImage = {
         ...editingMemory,
-        title: newTitle.trim() || 'ذكرى حلوة لينا',
-        date: newDate.trim() || 'لحظة خاصة',
-        caption: newCaption.trim() || 'ذكرى لا تُنسى في قصة حبنا الجميلة.',
+        title: newTitle.trim() || editingMemory.title || 'ذكرى حلوة لينا',
+        date: newDate.trim() || editingMemory.date || 'لحظة خاصة',
+        caption: newCaption.trim() || editingMemory.caption || 'ذكرى لا تُنسى في قصة حبنا الجميلة.',
         imageUrl: finalUrl || editingMemory.imageUrl,
       };
       onUpdateMemory?.(updatedPhoto);
     } else {
       const newPhoto: MemoryImage = {
-        id: 'photo_' + Date.now(),
-        title: newTitle.trim() || 'ذكرى حلوة لينا',
+        id: 'photo_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        title: newTitle.trim() || 'صورتنا الحلوة',
         date: newDate.trim() || 'لحظة خاصة',
-        caption: newCaption.trim() || 'ذكرى لا تُنسى في قصة حبنا الجميلة.',
-        imageUrl: finalUrl,
+        caption: newCaption.trim() || 'ذكرى لا تُنسى من أجمل أيامنا سوا ❤️',
+        imageUrl: finalUrl || '/uploads/photo_1792489959014_33id2i.jpg',
         fallbackGradient: 'from-rose-950 via-purple-950 to-neutral-950',
       };
       onAddMemory(newPhoto);
@@ -552,6 +585,14 @@ export const GallerySection: React.FC<GallerySectionProps> = ({
                 </label>
               </div>
 
+              {/* Processing indicator */}
+              {isProcessingImage && (
+                <div className="p-3 rounded-xl bg-rose-950/80 border border-rose-500/50 flex items-center justify-center gap-2 text-rose-200 text-xs animate-pulse">
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-spin" />
+                  <span>جاري تجهيز الصورة وضغطها بأعلى جودة... ثواني يا قمر ✨</span>
+                </div>
+              )}
+
               {/* Image Preview if chosen */}
               {previewUrl && (
                 <div className="relative w-full h-36 rounded-xl overflow-hidden border border-rose-700/50 bg-black">
@@ -630,9 +671,10 @@ export const GallerySection: React.FC<GallerySectionProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2.5 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl shadow-md transition-all cursor-pointer"
+                  disabled={isProcessingImage}
+                  className="px-6 py-2.5 text-xs font-semibold bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl shadow-md transition-all cursor-pointer"
                 >
-                  {editingMemory ? 'حفظ التعديل ✨' : 'حفظ في الألبوم ✨'}
+                  {isProcessingImage ? 'جاري التجهيز...' : editingMemory ? 'حفظ التعديل ✨' : 'حفظ في الألبوم ✨'}
                 </button>
               </div>
             </form>

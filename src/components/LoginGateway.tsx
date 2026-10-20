@@ -70,35 +70,42 @@ export const LoginGateway: React.FC<LoginGatewayProps> = ({
     const normPartner = normalize(partnerName);
     const normSender = normalize(senderName);
 
-    // 1. Check for Faress / Sender (Admin / Creator)
+    // 1. Check for Faress (Admin / Full Control)
     const isFaress =
       norm === 'faress' ||
       norm === 'fares' ||
       norm === 'فارس' ||
+      norm === 'faress nasser' ||
+      norm === 'fares nasser' ||
+      norm === 'فارس ناصر' ||
       norm === 'admin' ||
       norm === 'ادمن' ||
-      norm.includes('faress') ||
-      norm.includes('fares') ||
-      norm.includes('فارس') ||
-      (normSender.length >= 2 && norm.includes(normSender));
+      norm === 'faress2007' ||
+      norm === '2007' ||
+      (normSender.length >= 3 && norm === normSender);
 
     if (isFaress) {
       loginAsFaress();
       return;
     }
 
-    // 2. Check for ايويه or configured partnerName
+    // 2. Check for Ayoyha (Viewer Only)
     const isAyweya =
       norm === 'ايويه' ||
+      norm === 'أيويه' ||
       norm === 'ايوه' ||
+      norm === 'أيوه' ||
       norm === 'ايه' ||
-      norm === 'ايويا' ||
-      norm.startsWith('ايو') ||
+      norm === 'أية' ||
+      norm === 'آية' ||
       norm === 'aya' ||
+      norm === 'ayah' ||
       norm === 'ayweya' ||
       norm === 'ayoya' ||
       norm === 'ayota' ||
-      (normPartner.length >= 2 && (norm.includes(normPartner) || normPartner.includes(norm)));
+      norm === 'ايويا' ||
+      norm === 'ايوتي' ||
+      (normPartner.length >= 3 && norm === normPartner);
 
     if (isAyweya) {
       setIsSubmitting(true);
@@ -113,8 +120,8 @@ export const LoginGateway: React.FC<LoginGatewayProps> = ({
       return;
     }
 
-    // 3. Any other name: strictly blocked!
-    setErrorMessage('عذراً يا عيوني.. الموقع ده خاص وسري جداً بين أيويه وفارس بس 🔒💖 اتأكدي إنك كتبتي اسمك صح.');
+    // 3. Strictly block any unauthorized names
+    setErrorMessage('عذراً.. هذا الموقع خاص جداً وسري بين أيويه وفارس بس 🔒💖 اتأكدي إنك كتبتي اسمك صح.');
   };
 
   return (
@@ -241,20 +248,8 @@ export const LoginGateway: React.FC<LoginGatewayProps> = ({
             </button>
           </form>
 
-          {/* Quick Admin Access for Faress on Mobile & Desktop */}
-          <div className="mt-4 pt-3 border-t border-rose-900/30 flex items-center justify-center">
-            <button
-              type="button"
-              onClick={loginAsFaress}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-950/40 hover:bg-amber-900/50 border border-amber-600/40 text-amber-200 text-[11px] font-medium transition-colors cursor-pointer"
-            >
-              <Crown className="w-3 h-3 text-amber-400" />
-              <span>دخول سريع لفارس (التحكم والتعديل) 👑</span>
-            </button>
-          </div>
-
           {/* Sweet Romantic Footer */}
-          <div className="mt-4 pt-3 text-[11px] sm:text-xs text-rose-300/75 flex flex-col gap-1 items-center font-poetry">
+          <div className="mt-5 pt-3 text-[11px] sm:text-xs text-rose-300/75 flex flex-col gap-1 items-center font-poetry">
             <span>معمول بكل حب وشوق عشان أحلى ضحكة في الدنيا ❤️</span>
           </div>
         </div>

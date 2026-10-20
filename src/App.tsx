@@ -700,6 +700,21 @@ export default function App() {
         <GallerySection
           memories={memories}
           onAddMemory={handleAddMemory}
+          onAddMultipleMemories={(newBatch) => {
+            const updated = [...newBatch, ...memories];
+            setMemories(updated);
+            try {
+              localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
+            } catch (e) {
+              console.error(e);
+            }
+            fetch('/api/memories', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(updated),
+            }).catch((err) => console.error('Failed to sync multiple memories:', err));
+            showToast('تمت إضافة الصور وحفظها نهائياً! 📸✨');
+          }}
           onUpdateMemory={handleUpdateMemory}
           onDeleteMemory={handleDeleteMemory}
           canEdit={canEdit}

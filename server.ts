@@ -10,9 +10,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-// Increase JSON body limit to support base64 photos
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Increase JSON body limit to support base64 photos up to 100MB
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 const DATA_DIR = path.resolve(__dirname, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
@@ -96,19 +96,30 @@ app.post('/api/upload-image', (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing dataUrl in request' });
     }
 
-    const matches = dataUrl.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
-    if (!matches || matches.length !== 3) {
-      return res.status(400).json({ success: false, error: 'Invalid base64 dataUrl format' });
+    let mime = 'image/jpeg';
+    let base64Payload = dataUrl;
+
+    const commaIndex = dataUrl.indexOf(',');
+    if (dataUrl.startsWith('data:') && commaIndex !== -1) {
+      const header = dataUrl.substring(0, commaIndex);
+      const mimeMatch = header.match(/data:([^;]+)/);
+      if (mimeMatch && mimeMatch[1]) {
+        mime = mimeMatch[1];
+      }
+      base64Payload = dataUrl.substring(commaIndex + 1);
     }
 
-    const mime = matches[1];
+    // Clean any whitespace/newlines from base64 string
+    base64Payload = base64Payload.replace(/\s+/g, '');
+
     let ext = mime.split('/')[1] || 'jpg';
     if (ext === 'jpeg') ext = 'jpg';
-    ext = ext.replace(/[^a-zA-Z0-9]/g, '');
+    if (ext.includes('+')) ext = ext.split('+')[0];
+    ext = ext.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
 
     const safeName = `photo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
     const filePath = path.join(UPLOADS_DIR, safeName);
-    const buffer = Buffer.from(matches[2], 'base64');
+    const buffer = Buffer.from(base64Payload, 'base64');
     fs.writeFileSync(filePath, buffer);
 
     return res.json({
