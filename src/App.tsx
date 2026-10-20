@@ -289,12 +289,20 @@ export default function App() {
     };
   }, []);
 
-  // User login session
+  // User login session (Faress = admin, ايويه = viewer)
   const [userSession, setUserSession] = useState<UserSession | null>(() => {
     try {
       const saved = localStorage.getItem('romantic_user_session');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        const nameLower = (parsed.name || '').toLowerCase();
+        const isFaress =
+          nameLower.includes('fare') ||
+          (parsed.name && parsed.name.includes('فارس'));
+        return {
+          ...parsed,
+          role: isFaress ? 'admin' : 'viewer',
+        };
       }
       return null;
     } catch {
@@ -607,8 +615,8 @@ export default function App() {
     );
   }
 
-  // Always allow editing unless explicitly in Preview Mode
-  const canEdit = !isPreviewingAsViewer;
+  const effectiveRole = isPreviewingAsViewer ? 'viewer' : userSession?.role;
+  const canEdit = effectiveRole === 'admin';
 
   return (
     <div className="min-h-screen bg-[#0b0612] text-[#fce7f3] selection:bg-rose-500 selection:text-white relative overflow-x-hidden">
@@ -749,37 +757,39 @@ export default function App() {
         </aside>
       )}
 
-      {/* Customizer Modal - Always mounted so opening from Navbar or any section works immediately */}
-      <CustomizerModal
-        isOpen={isCustomizerOpen}
-        onClose={() => setIsCustomizerOpen(false)}
-        config={config}
-        onSaveConfig={handleSaveConfig}
-        onResetDefaults={handleResetDefaults}
-        initialTab={customizerTab}
-        uploadedAudioUrl={uploadedAudioUrl}
-        uploadedAudioName={uploadedAudioName}
-        onAudioUploaded={handleAudioUploaded}
-        onAudioRemoved={handleAudioRemoved}
-        memories={memories}
-        onImportBackup={(importedConfig, importedMemories) => {
-          handleSaveConfig(importedConfig);
-          if (importedMemories && Array.isArray(importedMemories)) {
-            setMemories(importedMemories);
-            try {
-              localStorage.setItem('romantic_bday_memories', JSON.stringify(importedMemories));
-            } catch (e) {
-              console.error(e);
+      {/* Customizer Modal - Only for Faress (Admin) */}
+      {canEdit && (
+        <CustomizerModal
+          isOpen={isCustomizerOpen}
+          onClose={() => setIsCustomizerOpen(false)}
+          config={config}
+          onSaveConfig={handleSaveConfig}
+          onResetDefaults={handleResetDefaults}
+          initialTab={customizerTab}
+          uploadedAudioUrl={uploadedAudioUrl}
+          uploadedAudioName={uploadedAudioName}
+          onAudioUploaded={handleAudioUploaded}
+          onAudioRemoved={handleAudioRemoved}
+          memories={memories}
+          onImportBackup={(importedConfig, importedMemories) => {
+            handleSaveConfig(importedConfig);
+            if (importedMemories && Array.isArray(importedMemories)) {
+              setMemories(importedMemories);
+              try {
+                localStorage.setItem('romantic_bday_memories', JSON.stringify(importedMemories));
+              } catch (e) {
+                console.error(e);
+              }
+              fetch('/api/memories', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(importedMemories),
+              }).catch(console.error);
             }
-            fetch('/api/memories', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(importedMemories),
-            }).catch(console.error);
-          }
-          showToast('تمت استعادة وتطبيق النسخة الاحتياطية بنجاح! 💾✨');
-        }}
-      />
+            showToast('تمت استعادة وتطبيق النسخة الاحتياطية بنجاح! 💾✨');
+          }}
+        />
+      )}
 
       {/* Floating Save/Status Toast Notification */}
       {toastMessage && (

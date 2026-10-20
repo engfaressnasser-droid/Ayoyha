@@ -106,23 +106,15 @@ export const LoginGateway: React.FC<LoginGatewayProps> = ({
       setTimeout(() => {
         onLogin({
           name: 'ايويه',
-          displayName: 'ايويه (ملكة اليوم 👑)',
-          role: 'admin',
+          displayName: 'أيويه (ملكة اليوم 👑)',
+          role: 'viewer',
         });
       }, 250);
       return;
     }
 
-    // 3. Any other non-empty name: allow entry with admin privileges so user is never locked out
-    setIsSubmitting(true);
-    romanticAudio.playCelebrationChime();
-    setTimeout(() => {
-      onLogin({
-        name: raw,
-        displayName: `${raw} 💖`,
-        role: 'admin',
-      });
-    }, 250);
+    // 3. Any other name: strictly blocked!
+    setErrorMessage('عذراً يا عيوني.. الموقع ده خاص وسري جداً بين أيويه وفارس بس 🔒💖 اتأكدي إنك كتبتي اسمك صح.');
   };
 
   return (
