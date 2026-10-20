@@ -101,22 +101,40 @@ export const GallerySection: React.FC<GallerySectionProps> = ({
     }
   };
 
-  // Fast client-side image compression so photos fit smoothly into storage without failing
+  // Fast client-side image compression with robust fallback
   const compressImageFile = (file: File): Promise<string> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const result = e.target?.result;
         if (!result || typeof result !== 'string') {
-          resolve('');
+          // Fallback to object URL if reader fails
+          try {
+            resolve(URL.createObjectURL(file));
+          } catch {
+            resolve('');
+          }
           return;
         }
 
         const img = new Image();
+        let resolved = false;
+
+        // Safety timeout in case image decode hangs on mobile
+        const timer = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            resolve(result);
+          }
+        }, 2000);
+
         img.onload = () => {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timer);
           try {
             const canvas = document.createElement('canvas');
-            const maxDim = 1080;
+            const maxDim = 1200;
             let width = img.width;
             let height = img.height;
 
@@ -138,19 +156,27 @@ export const GallerySection: React.FC<GallerySectionProps> = ({
               return;
             }
             ctx.drawImage(img, 0, 0, width, height);
-            const compressed = canvas.toDataURL('image/jpeg', 0.80);
+            const compressed = canvas.toDataURL('image/jpeg', 0.85);
             resolve(compressed || result);
           } catch {
             resolve(result);
           }
         };
         img.onerror = () => {
-          // If Image() fails to decode, fallback directly to reader base64 result
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timer);
           resolve(result);
         };
         img.src = result;
       };
-      reader.onerror = () => resolve('');
+      reader.onerror = () => {
+        try {
+          resolve(URL.createObjectURL(file));
+        } catch {
+          resolve('');
+        }
+      };
       reader.readAsDataURL(file);
     });
   };
