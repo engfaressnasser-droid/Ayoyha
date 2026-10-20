@@ -88,8 +88,10 @@ app.post('/api/memories', (req, res) => {
   }
 });
 
-// POST /api/upload-image - Save uploaded photo directly to disk and return static URL
-app.post('/api/upload-image', (req, res) => {
+import { put } from '@vercel/blob';
+
+// POST /api/upload-image - Upload photo to Vercel Blob Store or fallback to local disk
+app.post('/api/upload-image', async (req, res) => {
   try {
     const { dataUrl, fileName } = req.body;
     if (!dataUrl || typeof dataUrl !== 'string') {
@@ -118,14 +120,38 @@ app.post('/api/upload-image', (req, res) => {
     ext = ext.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
 
     const safeName = `photo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-    const filePath = path.join(UPLOADS_DIR, safeName);
     const buffer = Buffer.from(base64Payload, 'base64');
+
+    // 1. If Vercel Blob Token is set, upload directly to Vercel Blob Store CDN
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+    if (blobToken) {
+      try {
+        const blob = await put(`photos/${safeName}`, buffer, {
+          access: 'public',
+          contentType: mime,
+          token: blobToken,
+        });
+        console.log('Successfully saved photo to Vercel Blob CDN:', blob.url);
+        return res.json({
+          success: true,
+          url: blob.url,
+          fileName: fileName || safeName,
+          provider: 'vercel-blob',
+        });
+      } catch (blobErr) {
+        console.error('Vercel Blob upload failed, fallback to disk:', blobErr);
+      }
+    }
+
+    // 2. Local disk storage fallback
+    const filePath = path.join(UPLOADS_DIR, safeName);
     fs.writeFileSync(filePath, buffer);
 
     return res.json({
       success: true,
       url: `/uploads/${safeName}`,
       fileName: fileName || safeName,
+      provider: 'local',
     });
   } catch (err) {
     console.error('Error uploading image:', err);
