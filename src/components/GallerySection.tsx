@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Camera, Maximize2, X, ChevronRight, ChevronLeft, Plus, Heart, Trash2, UploadCloud, Edit3 } from 'lucide-react';
+import { Camera, Maximize2, X, ChevronRight, ChevronLeft, Plus, Heart, Trash2, UploadCloud, Edit3, Sparkles } from 'lucide-react';
 import { MemoryImage } from '../types';
 
 interface GallerySectionProps {
@@ -31,6 +31,11 @@ export const GallerySection: React.FC<GallerySectionProps> = ({
   const [photoToDelete, setPhotoToDelete] = useState<MemoryImage | null>(null);
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
   const [isProcessingImage, setIsProcessingImage] = useState<boolean>(false);
+
+  React.useEffect(() => {
+    // Clear image error state whenever memories update so new/updated photos render immediately
+    setImgErrors({});
+  }, [memories]);
 
   // Photo form state (used for both Add and Edit)
   const [newTitle, setNewTitle] = useState('');

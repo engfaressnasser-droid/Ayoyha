@@ -53,6 +53,7 @@ interface CustomizerModalProps {
   onAudioUploaded?: (audioUrl: string, fileName: string) => void;
   onAudioRemoved?: () => Promise<void>;
   memories?: MemoryImage[];
+  onSaveMemories?: (updated: MemoryImage[]) => void;
   onImportBackup?: (config: BirthdayConfig, memories?: MemoryImage[]) => void;
 }
 
@@ -68,9 +69,11 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({
   onAudioUploaded,
   onAudioRemoved,
   memories = [],
+  onSaveMemories,
   onImportBackup,
 }) => {
   const [activeTab, setActiveTab] = useState<CustomizerTab>(initialTab);
+  const [editableMemories, setEditableMemories] = useState<MemoryImage[]>(memories || []);
 
   // Tab 1: Names & Dates
   const [partnerName, setPartnerName] = useState(config.partnerName);
@@ -215,6 +218,7 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({
         config.wishMessageBody ||
           'يا رب يجعل أيامك الجاية كلها سكر زي قلبك، ويفرح روحك وما يوريني فيكي أي حاجة وحشة أبداً، وتفضلي منورة حياتي ومحليّاها دايماً يا أجمل حظ في عمري.'
       );
+      setEditableMemories(memories || []);
       setCustomSongTitle(config.customSongTitle || '');
       setCustomSongUrl(config.customSongUrl || '/music/hobb-al-omr.mp3');
       setFooterLoveText(config.footerLoveText || 'اتعملت بكل حب عشان عيون');
@@ -223,7 +227,7 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({
           'كل ثانية، وكل دقيقة، وكل سنة.. وأنتي أجمل نعمة في حياتي ومنورة دنيتي كلها.'
       );
     }
-  }, [isOpen, config]);
+  }, [isOpen, config, memories]);
 
   if (!isOpen) return null;
 
@@ -282,6 +286,90 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({
     setReasonsWhy(reasonsWhy.filter((r) => r.id !== id));
   };
 
+  const compressModalImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        if (!result) {
+          resolve('');
+          return;
+        }
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const maxDim = 1080;
+            let width = img.width;
+            let height = img.height;
+            if (width > maxDim || height > maxDim) {
+              if (width > height) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+              } else {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+              }
+            }
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              resolve(result);
+              return;
+            }
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.80) || result);
+          } catch {
+            resolve(result);
+          }
+        };
+        img.onerror = () => resolve(result);
+        img.src = result;
+      };
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleModalPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, targetIdx?: number) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    if (targetIdx !== undefined) {
+      const file = files[0];
+      const dataUrl = await compressModalImage(file);
+      if (dataUrl) {
+        setEditableMemories((prev) => {
+          const updated = [...prev];
+          if (updated[targetIdx]) {
+            updated[targetIdx] = { ...updated[targetIdx], imageUrl: dataUrl };
+          }
+          return updated;
+        });
+      }
+    } else {
+      const batch: MemoryImage[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const dataUrl = await compressModalImage(file);
+        if (dataUrl) {
+          batch.push({
+            id: 'photo_' + Date.now() + '_' + i + '_' + Math.random().toString(36).substring(2, 6),
+            title: file.name.replace(/\.[^/.]+$/, '').trim() || `صورتنا الحلوة #${editableMemories.length + i + 1}`,
+            date: 'لحظة خاصة',
+            caption: 'ذكرى حلوة من أجمل أيامنا سوا ❤️',
+            imageUrl: dataUrl,
+            fallbackGradient: 'from-rose-950 via-purple-950 to-neutral-950',
+          });
+        }
+      }
+      if (batch.length > 0) {
+        setEditableMemories((prev) => [...batch, ...prev]);
+      }
+    }
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault?.();
     setIsSaving(true);
@@ -295,6 +383,10 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({
         }
         const newUrl = URL.createObjectURL(selectedAudioFile);
         onAudioUploaded?.(newUrl, selectedAudioFile.name);
+      }
+
+      if (onSaveMemories) {
+        onSaveMemories(editableMemories);
       }
 
       onSaveConfig({
@@ -862,36 +954,161 @@ export const CustomizerModal: React.FC<CustomizerModalProps> = ({
 
           {/* TAB 5: GALLERY SECTION */}
           {activeTab === 'gallery' && (
-            <div className="space-y-4 animate-in fade-in duration-150">
-              <div>
-                <label className="block text-xs font-medium text-rose-300 mb-1.5">
-                  عنوان قسم معرض الصور والذكريات:
-                </label>
-                <input
-                  type="text"
-                  value={galleryTitle}
-                  onChange={(e) => setGalleryTitle(e.target.value)}
-                  placeholder="معرض صورنا وذكرياتنا الحلوة"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-900/90 border border-rose-900/40 text-base text-white focus:outline-none focus:border-rose-500"
-                />
+            <div className="space-y-5 animate-in fade-in duration-150">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-rose-300 mb-1.5">
+                    عنوان قسم معرض الصور والذكريات:
+                  </label>
+                  <input
+                    type="text"
+                    value={galleryTitle}
+                    onChange={(e) => setGalleryTitle(e.target.value)}
+                    placeholder="معرض صورنا وذكرياتنا الحلوة"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-900/90 border border-rose-900/40 text-sm text-white focus:outline-none focus:border-rose-500 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-rose-300 mb-1.5">
+                    العنوان الفرعي لمعرض الصور:
+                  </label>
+                  <input
+                    type="text"
+                    value={gallerySubtitle}
+                    onChange={(e) => setGallerySubtitle(e.target.value)}
+                    placeholder="ألبوم حكاياتنا وسنين حبنا"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-900/90 border border-rose-900/40 text-sm text-white focus:outline-none focus:border-rose-500"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-rose-300 mb-1.5">
-                  العنوان الفرعي لمعرض الصور:
+              {/* Photos Management Section Header */}
+              <div className="pt-2 border-t border-rose-900/40 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <span className="text-xs text-rose-300 font-bold block">
+                    📸 صور الألبوم والذكريات ({editableMemories.length} صور)
+                  </span>
+                  <span className="text-[11px] text-rose-400/70 block">
+                    تقدر تضيف صور من موبايلك، وتغير أي صورة أو كلام على كروت الصور بكليك واحد!
+                  </span>
+                </div>
+
+                <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-bold transition-all cursor-pointer shadow-md active:scale-95">
+                  <Plus className="w-4 h-4" />
+                  <span>إضافة صور جديدة 📸</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => handleModalPhotoUpload(e)}
+                    className="hidden"
+                  />
                 </label>
-                <input
-                  type="text"
-                  value={gallerySubtitle}
-                  onChange={(e) => setGallerySubtitle(e.target.value)}
-                  placeholder="ألبوم حكاياتنا وسنين حبنا · أول ما اتعرفنا على بعض 21 يوليو 2026"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-neutral-900/90 border border-rose-900/40 text-base text-white focus:outline-none focus:border-rose-500"
-                />
               </div>
 
-              <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-700/40 text-xs text-rose-200/90 leading-relaxed">
-                <span className="font-bold text-white block mb-1">📸 إضافة الصور ومسحها:</span>
-                تقدر ترفع صوركم مباشرة من قسم المعرض في الصفحة من خلال زر "ارفع صورة جديدة لينا"، أو تختار صور متعددة من موبايلك، وتعدل أو تمسح أي صورة في أي وقت!
+              {/* Photos List */}
+              <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+                {editableMemories.length === 0 ? (
+                  <div className="p-6 text-center rounded-2xl bg-neutral-950/60 border border-dashed border-rose-900/40 text-rose-300/70 text-xs">
+                    مفيش صور حالياً في الألبوم. اضغط على "إضافة صور جديدة" فوق للرفع من المعرض!
+                  </div>
+                ) : (
+                  editableMemories.map((mem, idx) => (
+                    <div
+                      key={mem.id || idx}
+                      className="p-3.5 rounded-2xl bg-neutral-950/80 border border-rose-900/50 space-y-3 relative"
+                    >
+                      <div className="flex items-start gap-3">
+                        {/* Thumbnail Preview */}
+                        <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden border border-rose-700/50 bg-black shrink-0">
+                          {mem.imageUrl ? (
+                            <img src={mem.imageUrl} alt={mem.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-rose-500 text-xs">لا توجد صورة</div>
+                          )}
+                          <label className="absolute inset-0 bg-black/65 opacity-0 hover:opacity-100 flex flex-col items-center justify-center text-[10px] text-white font-bold transition-opacity cursor-pointer">
+                            <Camera className="w-4 h-4 mb-0.5 text-pink-300 animate-pulse" />
+                            <span>تغيير</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => handleModalPhotoUpload(e, idx)}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+
+                        {/* Title & Date */}
+                        <div className="flex-1 space-y-2 text-right">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-mono text-rose-400 bg-rose-950/80 px-2 py-0.5 rounded-md">
+                              صورة #{idx + 1}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditableMemories((prev) => prev.filter((_, i) => i !== idx));
+                              }}
+                              className="p-1 rounded-lg text-rose-400 hover:text-red-300 hover:bg-red-950/50 transition-colors cursor-pointer"
+                              title="حذف هذه الصورة"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          <input
+                            type="text"
+                            value={mem.title}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setEditableMemories((prev) => {
+                                const updated = [...prev];
+                                updated[idx] = { ...updated[idx], title: val };
+                                return updated;
+                              });
+                            }}
+                            placeholder="عنوان الصورة"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-neutral-900 border border-rose-900/40 text-xs text-white font-bold focus:outline-none focus:border-rose-500"
+                          />
+
+                          <input
+                            type="text"
+                            value={mem.date}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setEditableMemories((prev) => {
+                                const updated = [...prev];
+                                updated[idx] = { ...updated[idx], date: val };
+                                return updated;
+                              });
+                            }}
+                            placeholder="التاريخ / المناسبة"
+                            className="w-full px-2.5 py-1 rounded-lg bg-neutral-900 border border-rose-900/40 text-[11px] text-rose-200 focus:outline-none focus:border-rose-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Caption */}
+                      <div>
+                        <textarea
+                          rows={2}
+                          value={mem.caption}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEditableMemories((prev) => {
+                              const updated = [...prev];
+                              updated[idx] = { ...updated[idx], caption: val };
+                              return updated;
+                            });
+                          }}
+                          placeholder="الوصف والكلام الحلو عن الصورة..."
+                          className="w-full px-3 py-1.5 rounded-xl bg-neutral-900/90 border border-rose-900/30 text-xs text-rose-100 font-poetry focus:outline-none focus:border-rose-500 leading-relaxed"
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}

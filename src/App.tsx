@@ -17,6 +17,7 @@ import { LoginGateway, UserSession } from './components/LoginGateway';
 import { Footer } from './components/Footer';
 import { BirthdayConfig, MemoryImage, LoveReason } from './types';
 import { getCustomAudio, removeCustomAudio } from './utils/audioStorage';
+import { saveMemoriesToIndexedDB, getMemoriesFromIndexedDB } from './utils/photoStorage';
 
 const DEFAULT_ENVELOPE_LETTER = `كل سنة وانتي طيبة يا أيويه يا روح قلبي، وكل سنة وانتي معايا ومنورة حياتي، وكل سنة وانتي أحلى حاجة حصلتلي في الدنيا ❤️
 
@@ -260,17 +261,34 @@ export default function App() {
       })
       .catch((err) => console.log('Using local config fallback:', err));
 
+    // Load persistent memories from IndexedDB
+    getMemoriesFromIndexedDB().then((idbMemories) => {
+      if (isMounted && idbMemories && idbMemories.length > 0) {
+        setMemories((prev) => {
+          const ids = new Set(idbMemories.map((m) => m.id));
+          const extra = prev.filter((m) => !ids.has(m.id));
+          return [...idbMemories, ...extra];
+        });
+      }
+    });
+
     fetch('/api/memories')
       .then((res) => res.json())
       .then((data) => {
         if (!isMounted) return;
         if (data.success && Array.isArray(data.memories) && data.memories.length > 0) {
-          setMemories(data.memories);
-          try {
-            localStorage.setItem('romantic_bday_memories', JSON.stringify(data.memories));
-          } catch (e) {
-            console.error(e);
-          }
+          setMemories((prev) => {
+            const serverIds = new Set(data.memories.map((m: MemoryImage) => m.id));
+            const localOnly = prev.filter((m) => !serverIds.has(m.id));
+            const merged = [...data.memories, ...localOnly];
+            saveMemoriesToIndexedDB(merged);
+            try {
+              localStorage.setItem('romantic_bday_memories', JSON.stringify(merged));
+            } catch (e) {
+              console.error(e);
+            }
+            return merged;
+          });
         } else if (data.success && (!data.memories || data.memories.length === 0)) {
           const localMem = localStorage.getItem('romantic_bday_memories');
           if (localMem) {
@@ -427,96 +445,86 @@ export default function App() {
   };
 
   const handleAddMemory = async (newMem: MemoryImage) => {
-    let memoryToSave = newMem;
-
-    // Upload base64 photos to server disk for permanent file storage
-    if (newMem.imageUrl.startsWith('data:image/')) {
+    setMemories((prev) => {
+      const updated = [newMem, ...prev];
+      saveMemoriesToIndexedDB(updated);
       try {
-        const res = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dataUrl: newMem.imageUrl,
-            fileName: newMem.title,
-          }),
-        });
-        const data = await res.json();
-        if (data.success && data.url) {
-          memoryToSave = { ...newMem, imageUrl: data.url };
-        }
-      } catch (err) {
-        console.warn('Image upload fallback:', err);
+        localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
       }
-    }
 
-    const updated = [memoryToSave, ...memories];
-    setMemories(updated);
-    try {
-      localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
-    } catch (e) {
-      console.error(e);
-    }
-    fetch('/api/memories', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated),
-    }).catch((err) => console.error('Failed to sync memories to server:', err));
+      // Sync updated array (with full photo data) directly to server so all devices render it
+      fetch('/api/memories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      }).catch((err) => console.error('Failed to sync new memory to server:', err));
 
-    showToast('تمت إضافة الصورة وحفظها نهائياً! 📸✨');
+      return updated;
+    });
+
+    showToast('تمت إضافة الصورة وحفظها بنجاح! 📸✨');
   };
 
   const handleUpdateMemory = async (updatedMem: MemoryImage) => {
-    let memoryToSave = updatedMem;
-
-    if (updatedMem.imageUrl.startsWith('data:image/')) {
+    setMemories((prev) => {
+      const updated = prev.map((m) => (m.id === updatedMem.id ? updatedMem : m));
+      saveMemoriesToIndexedDB(updated);
       try {
-        const res = await fetch('/api/upload-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dataUrl: updatedMem.imageUrl,
-            fileName: updatedMem.title,
-          }),
-        });
-        const data = await res.json();
-        if (data.success && data.url) {
-          memoryToSave = { ...updatedMem, imageUrl: data.url };
-        }
-      } catch (err) {
-        console.warn('Image upload fallback:', err);
+        localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
       }
-    }
 
-    const updated = memories.map((m) => (m.id === memoryToSave.id ? memoryToSave : m));
-    setMemories(updated);
-    try {
-      localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
-    } catch (e) {
-      console.error(e);
-    }
-    fetch('/api/memories', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated),
-    }).catch((err) => console.error('Failed to sync updated memory to server:', err));
+      // Sync updated array to server so all devices render the modification
+      fetch('/api/memories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      }).catch((err) => console.error('Failed to sync updated memory to server:', err));
 
-    showToast('تم تعديل الصورة وحفظها نهائياً! ✏️✨');
+      return updated;
+    });
+
+    showToast('تم تعديل الصورة وحفظها بنجاح! ✏️✨');
   };
 
   const handleDeleteMemory = (id: string) => {
-    const updated = memories.filter((m) => m.id !== id);
-    setMemories(updated);
+    setMemories((prev) => {
+      const updated = prev.filter((m) => m.id !== id);
+      saveMemoriesToIndexedDB(updated);
+      try {
+        localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      fetch('/api/memories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated),
+      }).catch((err) => console.error('Failed to sync delete to server:', err));
+      return updated;
+    });
+    showToast('تم مسح الصورة من الألبوم 🗑️');
+  };
+
+  const handleSaveMemories = async (updatedMemories: MemoryImage[]) => {
+    setMemories(updatedMemories);
+    saveMemoriesToIndexedDB(updatedMemories);
     try {
-      localStorage.setItem('romantic_bday_memories', JSON.stringify(updated));
+      localStorage.setItem('romantic_bday_memories', JSON.stringify(updatedMemories));
     } catch (e) {
       console.error(e);
     }
+
     fetch('/api/memories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated),
-    }).catch((err) => console.error('Failed to sync delete to server:', err));
-    showToast('تم مسح الصورة من الألبوم 🗑️');
+      body: JSON.stringify(updatedMemories),
+    }).catch((err) => console.error('Failed to sync memories to server:', err));
+
+    showToast('تم حفظ معرض الصور والذكريات بنجاح! 📸✨');
   };
 
   const activeSongUrl = uploadedAudioUrl || config.customSongUrl || '/music/hobb-al-omr.mp3';
@@ -786,6 +794,7 @@ export default function App() {
           onAudioUploaded={handleAudioUploaded}
           onAudioRemoved={handleAudioRemoved}
           memories={memories}
+          onSaveMemories={handleSaveMemories}
           onImportBackup={(importedConfig, importedMemories) => {
             handleSaveConfig(importedConfig);
             if (importedMemories && Array.isArray(importedMemories)) {
